@@ -88,37 +88,14 @@ jobs:
           wget "${TARBALL_BASE_URL}"/"${DEB_NAME:0:1}"/"${DEB_NAME}"/"${DEB_NAME}"-"${DEB_VERSION}".tar.gz
           tar -xzf "${DEB_NAME}"-"${DEB_VERSION}".tar.gz
           cd "${DEB_NAME}"-"${DEB_VERSION}" || exit
-          _ANSIBLE_SDIST_FROM_MAKEFILE=1 python3 setup.py sdist --dist-dir=dist
+          
+          # add DEBSIGN_PROGRAM option for non-interactive signing
+          sed -Ei 's/(\s+DEBUILD_OPTS \+= -k\$\(DEBSIGN_KEYID\))$/\1 -p"$(DEBSIGN_PROGRAM)"/g' Makefile
 
-          DATE=$(date -R)
-          export DATE
+          # switch to environment variable PYTHON
+          sed -E 's/^(PYTHON)=/\1 ?= /g' docs/docsite/Makefile
 
-          for DIST in ${DEB_DIST}; do
-            export DIST
+          # overwrite debian files using this repo's files
+          cp -a "${HOME}"/work/ppa/ppa/"${DEB_NAME}"/debian/* packaging/debian/
 
-            mkdir -p deb-build/"${DIST}"
-            tar -C deb-build/"${DIST}" -xzf dist/"${DEB_NAME}"-"${DEB_VERSION}".tar.gz
-            mkdir deb-build/"${DIST}"/"${DEB_NAME}"-"${DEB_VERSION}"/debian
-            envsubst < "${HOME}"/work/ppa/ppa/"${DEB_NAME}"/templates/changelog > deb-build/"${DIST}"/"${DEB_NAME}"-"${DEB_VERSION}"/debian/changelog
-            
-            # overwrite debian files using this repo's files
-            cp -a "${HOME}"/work/ppa/ppa/"${DEB_NAME}"/debian/* deb-build/"${DIST}"/"${DEB_NAME}"-"${DEB_VERSION}"/debian/
-
-            chmod +x deb-build/"${DIST}"/"${DEB_NAME}"-"${DEB_VERSION}"/debian/rules
-            cd deb-build/"${DIST}"/"${DEB_NAME}"-"${DEB_VERSION}" || exit
-            
-            if [ "${DIST}" == "focal" ] || [ "${DIST}" == "impish" ]; then
-              cp -a "${HOME}"/work/ppa/ppa/"${DEB_NAME}"/control_file/control_focal_impish ./debian/control
-              pip install --upgrade -t ./lib/ansible/_vendor/ jinja2=="${JINJA2_VERSION}" resolvelib=="${RESOLVELIB_VERSION}"
-              export DEST=usr/lib/python3/dist-packages/ansible/_vendor
-              echo "lib/ansible/_vendor/Jinja2-${JINJA2_VERSION}.dist-info ${DEST}" >> ./debian/ansible-core.install
-              echo "lib/ansible/_vendor/MarkupSafe-2.1.1.dist-info ${DEST}" >> ./debian/ansible-core.install
-              echo "lib/ansible/_vendor/resolvelib-${RESOLVELIB_VERSION}.dist-info ${DEST}" >> ./debian/ansible-core.install
-            else
-              cp -a "${HOME}"/work/ppa/ppa/"${DEB_NAME}"/control_file/control ./debian/control
-            fi
-            
-            debuild --source-option='-I' -S -k"${DEBSIGN_KEYID}" -p"$(echo "${DEBSIGN_PROGRAM}" | envsubst)"
-            cd - || exit
-            dput "${LAUNCHPAD_PPA}" deb-build/"${DIST}"/"${DEB_NAME}"_"${DEB_CHANGELOG_VERSION}"-"${DEB_RELEASE}"~"${DIST}"_source.changes
-          done
+          time DEB_PPA="${LAUNCHPAD_PPA}" DEB_VERSION="${DEB_CHANGELOG_VERSION}" PYTHON=python3 make deb-src-upload
